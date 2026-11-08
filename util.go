@@ -82,7 +82,14 @@ func hasTag(c Command, tag string) bool {
 
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	// /dev/null is a character device too, but not a terminal.
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	return true
 }
 
 func scopeLabel(scope string) string {

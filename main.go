@@ -62,7 +62,7 @@ is placed in your terminal prompt so you can edit it before running.`,
 	root.SetVersionTemplate("bud {{.Version}}\n")
 	root.AddCommand(
 		newDoCmd(), newAddCmd(), newRunCmd(), newListCmd(), newSearchCmd(),
-		newInfoCmd(), newEditCmd(), newRmCmd(), newCopyCmd(), newUICmd(),
+		newInfoCmd(), newEditCmd(), newRmCmd(), newCopyCmd(), newExportCmd(), newSyncCmd(), newUICmd(),
 		newCompletionCmd(root), newVersionCmd(),
 	)
 	return root
