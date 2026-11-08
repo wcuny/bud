@@ -28,6 +28,9 @@ var webFS embed.FS
 const defaultPort = 11112
 
 func runUI(port int, noOpen bool) error {
+	if alreadyRunning(port, noOpen) {
+		return nil
+	}
 	st, err := openStore()
 	if err != nil {
 		return fail(err)
@@ -80,10 +83,13 @@ func uiPidFile(port int) (string, error) {
 
 // Starts the dashboard as a background process in its own session
 func detachUI(port int, noOpen bool) error {
+	if alreadyRunning(port, noOpen) {
+		return nil
+	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fail(fmt.Errorf("port %d is not available (already running? try `bud ui --stop`): %v", port, err))
+		return fail(fmt.Errorf("port %d is not available (another program is using it? try --port): %v", port, err))
 	}
 	ln.Close()
 
@@ -124,26 +130,60 @@ func detachUI(port int, noOpen bool) error {
 	return nil
 }
 
+// runningUI reports the pid of a dashboard already serving this port. It
+// needs a pid file whose process is alive and a live listener on the port, so
+// a stale pid file (crash, reused pid) is never trusted.
+func runningUI(port int) (int, bool) {
+	pf, err := uiPidFile(port)
+	if err != nil {
+		return 0, false
+	}
+	b, err := os.ReadFile(pf)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return 0, false
+	}
+	if proc, err := os.FindProcess(pid); err != nil || proc.Signal(syscall.Signal(0)) != nil {
+		return 0, false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return 0, false
+	}
+	conn.Close()
+	return pid, true
+}
+
+func alreadyRunning(port int, noOpen bool) bool {
+	pid, ok := runningUI(port)
+	if !ok {
+		return false
+	}
+	url := fmt.Sprintf("http://localhost:%d", port)
+	fmt.Fprintf(os.Stderr, "bud: the dashboard is already running at %s (pid %d); stop it with `bud ui --stop`\n", url, pid)
+	if !noOpen {
+		openBrowser(url)
+	}
+	return true
+}
+
 // stopUI stops the dashboard started on this port (foreground or detached).
 func stopUI(port int) error {
 	pf, err := uiPidFile(port)
 	if err != nil {
 		return fail(err)
 	}
-	b, err := os.ReadFile(pf)
-	if err != nil {
+	pid, ok := runningUI(port)
+	if !ok {
+		if _, err := os.Stat(pf); err == nil {
+			os.Remove(pf)
+			return fail(fmt.Errorf("no dashboard is running on port %d (removed a stale pid file)", port))
+		}
 		return fail(fmt.Errorf("no dashboard is running on port %d", port))
 	}
-	// Only signal if something is really listening: guards against a stale
-	// pid file whose pid has since been reused by another process.
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
-	pid, perr := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || perr != nil {
-		os.Remove(pf)
-		return fail(fmt.Errorf("no dashboard is running on port %d (removed a stale pid file)", port))
-	}
-	conn.Close()
-
 	proc, err := os.FindProcess(pid)
 	if err == nil {
 		err = proc.Signal(syscall.SIGTERM)
