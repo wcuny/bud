@@ -194,7 +194,7 @@ func newDoCmd() *cobra.Command {
 func newRunCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "run [name] [extra args...]",
-		Short: "Run a saved command (no name: interactive picker)",
+		Short: "Run a saved command",
 		Long: `Run a saved command by name. It is looked up in the current directory/repo
 scope first, then globally. Extra arguments are shell-quoted and appended.
 
@@ -424,7 +424,7 @@ func newEditCmd() *cobra.Command {
 	var global, here bool
 	c := &cobra.Command{
 		Use:               "edit <name> [--cmd <command>] [--name <new-name>] [--tip <text>] [--tag <tag>] [--global|--here]",
-		Short:             "Edit a saved command (no flags: interactive)",
+		Short:             "Edit a saved command",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeNames(false),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -63,7 +63,7 @@ func completeNames(filesAfterName bool) func(*cobra.Command, []string, string) (
 func newCompletionCmd(root *cobra.Command) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "completion",
-		Short: "Generate or install shell completion (bash, zsh, fish)",
+		Short: "Generate or install shell completion scripts",
 	}
 	for _, shell := range []string{"bash", "zsh", "fish"} {
 		shell := shell
