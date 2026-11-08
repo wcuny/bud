@@ -1,0 +1,284 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+//go:embed web
+var webFS embed.FS
+
+const defaultPort = 11112
+
+func runUI(port int, noOpen bool) error {
+	st, err := openStore()
+	if err != nil {
+		return fail(err)
+	}
+	defer st.Close()
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return fail(fmt.Errorf("cannot listen on port %d: %v (try --port)", port, err))
+	}
+	srv := &http.Server{Handler: newHandler(st, port), ReadHeaderTimeout: 5 * time.Second}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ln) }()
+
+	url := fmt.Sprintf("http://localhost:%d", port)
+	fmt.Fprintf(os.Stderr, "bud: dashboard at %s (Ctrl-C to stop)\n", url)
+	if !noOpen {
+		openBrowser(url)
+	}
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fail(err)
+		}
+	}
+	shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	srv.Shutdown(shutCtx)
+	return nil
+}
+
+func openBrowser(url string) {
+	var c *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		c = exec.Command("open", url)
+	case "windows":
+		c = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		c = exec.Command("xdg-open", url)
+	}
+	if err := c.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "bud: could not open a browser:", err)
+		return
+	}
+	go c.Wait()
+}
+
+type api struct{ st *Store }
+
+func newHandler(st *Store, port int) http.Handler {
+	a := &api{st: st}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/commands", a.list)
+	mux.HandleFunc("POST /api/commands", a.create)
+	mux.HandleFunc("PUT /api/commands/{id}", a.update)
+	mux.HandleFunc("DELETE /api/commands/{id}", a.remove)
+	sub, _ := fs.Sub(webFS, "web")
+	mux.Handle("/", http.FileServer(http.FS(sub)))
+	return guard(port, mux)
+}
+
+// guard blocks DNS rebinding and cross site requests. This API can write
+// commands that the user later executes, so it must not be reachable from
+// arbitrary web pages.
+func guard(port int, next http.Handler) http.Handler {
+	hosts := map[string]bool{
+		fmt.Sprintf("localhost:%d", port): true,
+		fmt.Sprintf("127.0.0.1:%d", port): true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hosts[r.Host] {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		if (r.Method == http.MethodPost || r.Method == http.MethodPut) &&
+			!strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			http.Error(w, "content-type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type scopeOpt struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func (a *api) list(w http.ResponseWriter, r *http.Request) {
+	all, err := a.st.List()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	tagSet, scopeSet := map[string]bool{}, map[string]bool{}
+	for _, c := range all {
+		for _, t := range c.Tags {
+			tagSet[t] = true
+		}
+		if c.Scope != "" {
+			scopeSet[c.Scope] = true
+		}
+	}
+	tags := []string{}
+	for t := range tagSet {
+		tags = append(tags, t)
+	}
+	sort.Strings(tags)
+	paths := []string{}
+	for s := range scopeSet {
+		paths = append(paths, s)
+	}
+	sort.Strings(paths)
+	scopes := []scopeOpt{{"global", "global"}}
+	for _, p := range paths {
+		scopes = append(scopes, scopeOpt{p, scopeLabel(p)})
+	}
+
+	q := r.URL.Query()
+	tag := strings.ToLower(strings.TrimSpace(q.Get("tag")))
+	scope := q.Get("scope")
+	var keep []Command
+	for _, c := range all {
+		if tag != "" && !hasTag(c, tag) {
+			continue
+		}
+		if scope == "global" && c.Scope != "" {
+			continue
+		}
+		if scope != "" && scope != "global" && c.Scope != scope {
+			continue
+		}
+		keep = append(keep, c)
+	}
+	cmds := rank(keep, q.Get("q"), "")
+	if cmds == nil {
+		cmds = []Command{}
+	}
+	writeJSON(w, 200, map[string]any{"commands": cmds, "tags": tags, "scopes": scopes})
+}
+
+type payload struct {
+	Name  string   `json:"name"`
+	Cmd   string   `json:"cmd"`
+	Tip   string   `json:"tip"`
+	Tags  []string `json:"tags"`
+	Scope string   `json:"scope"`
+}
+
+func decode(w http.ResponseWriter, r *http.Request) (*Command, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var p payload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, "bad JSON: "+err.Error(), 400)
+		return nil, false
+	}
+	c := &Command{
+		Name:  strings.TrimSpace(p.Name),
+		Cmd:   p.Cmd,
+		Tip:   p.Tip,
+		Tags:  normalizeTags(p.Tags),
+		Scope: strings.TrimSpace(p.Scope),
+	}
+	if c.Scope != "" {
+		c.Scope = filepath.Clean(c.Scope)
+	}
+	if strings.TrimSpace(c.Cmd) == "" {
+		http.Error(w, "command is required", 400)
+		return nil, false
+	}
+	if c.Name == "" {
+		c.Name = slugify(c.Cmd)
+	}
+	return c, true
+}
+
+func (a *api) create(w http.ResponseWriter, r *http.Request) {
+	c, ok := decode(w, r)
+	if !ok {
+		return
+	}
+	if err := a.st.Create(c); err != nil {
+		if isUnique(err) {
+			http.Error(w, "that name already exists in this scope", 409)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, 201, c)
+}
+
+func (a *api) update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", 400)
+		return
+	}
+	c, ok := decode(w, r)
+	if !ok {
+		return
+	}
+	c.ID = id
+	if err := a.st.Update(c); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			http.Error(w, "not found", 404)
+		case isUnique(err):
+			http.Error(w, "that name already exists in this scope", 409)
+		default:
+			http.Error(w, err.Error(), 500)
+		}
+		return
+	}
+	writeJSON(w, 200, c)
+}
+
+func (a *api) remove(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", 400)
+		return
+	}
+	if err := a.st.Delete(id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "not found", 404)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
+}

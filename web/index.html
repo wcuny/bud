@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>bud</title>
+<style>
+:root{color-scheme:light;--bg:#fff;--fg:#1b1f24;--muted:#6a737d;--card:#f6f8fa;--line:#d0d7de;--accent:#0969da;--danger:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+input,select,textarea,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.icon{display:inline-flex;align-items:center;justify-content:center;padding:5px;line-height:0}
+button.icon.danger:hover{border-color:var(--danger);color:var(--danger)}
+.sticky{position:sticky;top:0;z-index:5;background:var(--bg)}
+header{border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:16px;margin:0}
+.filters{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.filters #q{flex:1;min-width:180px}
+.combo{position:relative;width:190px}
+.combo input{width:100%}
+.menu{position:absolute;top:100%;left:0;right:0;margin-top:2px;max-height:240px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;z-index:10}
+.opt{padding:6px 10px;cursor:pointer}
+.opt.active{background:var(--card)}
+.opt.sel{font-weight:600}
+.opt.none{color:var(--muted);cursor:default}
+main{max-width:960px;margin:0 auto;padding:6px 16px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px}
+.top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.name{font-weight:600;font-size:15px}
+.meta{color:var(--muted);font-size:12px}
+.runs{margin-left:auto}
+.tag{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 8px;font-size:12px;cursor:pointer}
+.cmdwrap{display:flex;align-items:center;gap:6px;height:42px;margin:8px 0;padding-right:6px;background:var(--bg);border:1px solid var(--line);border-radius:6px}
+pre{flex:1;min-width:0;height:100%;margin:0;padding:0 10px;overflow-x:auto;overflow-y:hidden;white-space:pre;font:13px/40px ui-monospace,Menlo,Consolas,monospace;scrollbar-width:thin}
+pre.multi{overflow-y:auto;padding:10px;line-height:20px}
+.cmdwrap button{flex:none;background:transparent;border-color:transparent;color:var(--muted)}
+.cmdwrap button:hover{color:var(--accent);border-color:var(--line)}
+.tip{color:var(--muted);margin-bottom:8px}
+.actions{display:flex;gap:6px}.spacer{flex:1}
+.empty{color:var(--muted);text-align:center;padding:40px 0}
+dialog{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;width:min(560px,92vw);padding:16px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+label{display:block;margin:10px 0 3px;font-size:12px;color:var(--muted)}
+dialog input,dialog textarea{width:100%}
+textarea{min-height:90px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.err{color:var(--danger);margin-top:8px;min-height:1.2em}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="sticky">
+  <header>
+    <h1>bud</h1>
+    <button id="add" class="primary">+ Add</button>
+  </header>
+  <div class="filters">
+    <div class="combo" id="tag"></div>
+    <div class="combo" id="scope"></div>
+    <input id="q" type="search" placeholder="Search commands, names, tags, tips">
+  </div>
+</div>
+<main id="list"></main>
+
+<dialog id="dlg">
+  <form id="form">
+    <strong id="dlgTitle"></strong>
+    <label for="f-name">Name</label><input id="f-name" autocomplete="off">
+    <label for="f-cmd">Command</label><textarea id="f-cmd" required></textarea>
+    <label for="f-tip">Tip</label><input id="f-tip" autocomplete="off">
+    <label for="f-tags">Tags (comma-separated)</label><input id="f-tags" autocomplete="off">
+    <label for="f-scope">Scope: directory or repo path (blank = global)</label>
+    <input id="f-scope" list="scopeList" autocomplete="off"><datalist id="scopeList"></datalist>
+    <div class="err" id="err"></div>
+    <div class="row"><button type="button" id="cancel">Cancel</button><button class="primary" type="submit">Save</button></div>
+  </form>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let state = {commands: [], tags: [], scopes: []};
+let editingId = null;
+
+const ICONS = {
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  edit: '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+};
+function svg(name) {
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS[name] + '</svg>';
+}
+function iconButton(name, title, onclick, extra = '') {
+  const b = el('button', {className: 'icon ' + extra, title, onclick});
+  b.setAttribute('aria-label', title);
+  b.innerHTML = svg(name);
+  return b;
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...opts});
+  if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
+  return r.status === 204 ? null : r.json();
+}
+
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  kids.forEach((k) => e.append(k));
+  return e;
+}
+
+function combo(root, allLabel, onchange) {
+  const input = el('input', {type: 'text', placeholder: allLabel, autocomplete: 'off', spellcheck: false});
+  const menu = el('div', {className: 'menu', hidden: true});
+  root.append(input, menu);
+  let options = [], value = '', filterText = '', active = 0;
+
+  const all = () => [{value: '', label: allLabel}, ...options];
+  const labelOf = (v) => (options.find((o) => o.value === v) || {label: ''}).label;
+  const items = () => {
+    const f = filterText.trim().toLowerCase();
+    return f ? all().filter((o) => o.label.toLowerCase().includes(f)) : all();
+  };
+  const paint = () => {
+    const list = items();
+    active = Math.min(active, Math.max(0, list.length - 1));
+    menu.replaceChildren(...(list.length
+      ? list.map((o, i) => el('div', {
+          className: 'opt' + (i === active ? ' active' : '') + (o.value === value ? ' sel' : ''),
+          textContent: o.label,
+          onmousedown: (e) => { e.preventDefault(); choose(o.value); },
+        }))
+      : [el('div', {className: 'opt none', textContent: 'No matches'})]));
+  };
+  const open = () => { menu.hidden = false; paint(); };
+  const close = () => { menu.hidden = true; filterText = ''; input.value = value ? labelOf(value) : ''; };
+  const choose = (v) => { value = v; close(); input.blur(); onchange(); };
+
+  input.addEventListener('focus', () => {
+    filterText = '';
+    active = Math.max(0, all().findIndex((o) => o.value === value));
+    input.select();
+    open();
+  });
+  input.addEventListener('input', () => { filterText = input.value; active = 0; open(); });
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    const list = items();
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, list.length - 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (list[active]) choose(list[active].value); }
+    else if (e.key === 'Escape') { input.blur(); }
+  });
+
+  return {
+    get value() { return value; },
+    set(v) { value = v; input.value = value ? labelOf(value) : ''; },
+    setOptions(opts) {
+      options = opts;
+      if (value && !options.some((o) => o.value === value)) value = '';
+      if (menu.hidden) input.value = value ? labelOf(value) : ''; else paint();
+    },
+  };
+}
+
+const tagCombo = combo($('#tag'), 'All tags', () => load());
+const scopeCombo = combo($('#scope'), 'All repos/dirs', () => load());
+
+async function load() {
+  const p = new URLSearchParams();
+  if ($('#q').value.trim()) p.set('q', $('#q').value.trim());
+  if (tagCombo.value) p.set('tag', tagCombo.value);
+  if (scopeCombo.value) p.set('scope', scopeCombo.value);
+  try { state = await api('/api/commands?' + p); } catch (e) { $('#list').textContent = e.message; return; }
+  tagCombo.setOptions(state.tags.map((t) => ({value: t, label: t})));
+  scopeCombo.setOptions(state.scopes);
+  $('#scopeList').replaceChildren(...state.scopes.filter((s) => s.value !== 'global')
+    .map((s) => el('option', {value: s.value})));
+  render();
+}
+
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = el('textarea', {value: text});
+    document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+  btn.innerHTML = svg('check');
+  setTimeout(() => (btn.innerHTML = svg('copy')), 1000);
+}
+
+function render() {
+  const list = $('#list');
+  if (!state.commands.length) { list.replaceChildren(el('div', {className: 'empty', textContent: 'No commands found.'})); return; }
+  list.replaceChildren(...state.commands.map((c) => {
+    const copyBtn = iconButton('copy', 'Copy command', () => copy(c.cmd, copyBtn));
+    const tags = c.tags.map((t) => el('span', {className: 'tag', textContent: t,
+      onclick: () => { tagCombo.set(t); load(); }}));
+    return el('div', {className: 'card'},
+      el('div', {className: 'top'},
+        el('span', {className: 'name', textContent: c.name}),
+        el('span', {className: 'meta', textContent: c.scope ? c.scope : 'global'}),
+        ...tags,
+        c.run_count ? el('span', {className: 'meta runs', textContent: 'ran ' + c.run_count + 'x'}) : ''),
+      el('div', {className: 'cmdwrap'}, el('pre', {className: c.cmd.includes('\n') ? 'multi' : '', textContent: c.cmd}), copyBtn),
+      c.tip ? el('div', {className: 'tip', textContent: c.tip}) : '',
+      el('div', {className: 'actions'},
+        iconButton('edit', 'Edit', () => openDlg(c)),
+        el('span', {className: 'spacer'}),
+        iconButton('trash', 'Delete', () => del(c), 'danger')));
+  }));
+}
+
+function openDlg(c) {
+  editingId = c ? c.id : null;
+  $('#dlgTitle').textContent = c ? 'Edit command' : 'Add command';
+  $('#f-name').value = c ? c.name : '';
+  $('#f-cmd').value = c ? c.cmd : '';
+  $('#f-tip').value = c ? c.tip : '';
+  $('#f-tags').value = c ? c.tags.join(', ') : '';
+  $('#f-scope').value = c ? c.scope : '';
+  $('#err').textContent = '';
+  $('#dlg').showModal();
+  $('#f-cmd').focus();
+}
+
+async function del(c) {
+  if (!confirm('Delete "' + c.name + '"?')) return;
+  try { await api('/api/commands/' + c.id, {method: 'DELETE'}); load(); } catch (e) { alert(e.message); }
+}
+
+$('#form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const body = JSON.stringify({
+    name: $('#f-name').value, cmd: $('#f-cmd').value, tip: $('#f-tip').value,
+    tags: $('#f-tags').value.split(','), scope: $('#f-scope').value,
+  });
+  try {
+    await api(editingId ? '/api/commands/' + editingId : '/api/commands', {method: editingId ? 'PUT' : 'POST', body});
+    $('#dlg').close();
+    load();
+  } catch (e) { $('#err').textContent = e.message; }
+});
+$('#cancel').onclick = () => $('#dlg').close();
+$('#add').onclick = () => openDlg(null);
+let timer;
+$('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 150); });
+load();
+</script>
+</body>
+</html>
