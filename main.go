@@ -277,13 +277,16 @@ func printTable(cmds []Command, showScope bool) {
 }
 
 func newListCmd() *cobra.Command {
-	var all bool
+	var all, long bool
 	var tag string
 	c := &cobra.Command{
-		Use:     "list [--all] [--tag <tag>]",
+		Use:     "list [-l] [-a] [--tag <tag>]",
 		Aliases: []string{"ls"},
-		Short:   "List commands in the current directory/repo",
-		Args:    cobra.NoArgs,
+		Short:   "List command names in the current directory/repo",
+		Long: `List the names of commands in the current directory/repo.
+Use -l for a table with tags, command and tip, and -a to include global and
+other directories/repos.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := openStore()
 			if err != nil {
@@ -310,11 +313,19 @@ func newListCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bud: nothing here (try --all)")
 				return nil
 			}
-			printTable(rank(keep, "", scope), all)
+			keep = rank(keep, "", scope)
+			if long {
+				printTable(keep, all)
+				return nil
+			}
+			for _, c := range keep {
+				fmt.Println(c.Name)
+			}
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&all, "all", false, "include global and other directories/repos")
+	c.Flags().BoolVarP(&long, "long", "l", false, "long format: tags, command and tip in columns")
+	c.Flags().BoolVarP(&all, "all", "a", false, "include global and other directories/repos")
 	c.Flags().StringVar(&tag, "tag", "", "only this tag")
 	return c
 }
@@ -382,6 +393,7 @@ func newInfoCmd() *cobra.Command {
 func newCopyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:               "copy <name>",
+		Aliases:           []string{"cp"},
 		Short:             "Copy a command to the clipboard",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeNames(false),
@@ -550,14 +562,26 @@ func newRmCmd() *cobra.Command {
 
 func newUICmd() *cobra.Command {
 	var port int
-	var noOpen bool
+	var noOpen, detach, stop bool
 	c := &cobra.Command{
-		Use:   "ui [--port <n>] [--no-open]",
+		Use:   "ui [--port <n>] [--no-open] [--detach | --stop]",
 		Short: "Open the web dashboard",
 		Args:  cobra.NoArgs,
-		RunE:  func(cmd *cobra.Command, args []string) error { return runUI(port, noOpen) },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case detach && stop:
+				return errors.New("--detach and --stop are mutually exclusive")
+			case stop:
+				return stopUI(port)
+			case detach:
+				return detachUI(port, noOpen)
+			}
+			return runUI(port, noOpen)
+		},
 	}
 	c.Flags().IntVar(&port, "port", defaultPort, "listen port")
 	c.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
+	c.Flags().BoolVar(&detach, "detach", false, "run the dashboard in the background")
+	c.Flags().BoolVar(&stop, "stop", false, "stop the background dashboard on --port")
 	return c
 }

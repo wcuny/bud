@@ -42,7 +42,7 @@ clean:
 dist:
 	rm -rf dist/$(BINARY)-$(VERSION)
 	mkdir -p dist/$(BINARY)-$(VERSION)
-	cp -r *.go web go.mod go.sum Makefile README.md dist/$(BINARY)-$(VERSION)/
+	cp -r *.go web go.mod go.sum Makefile README.md LICENSE dist/$(BINARY)-$(VERSION)/
 	cd dist/$(BINARY)-$(VERSION) && go mod vendor
 	tar -C dist -czf dist/$(BINARY)-$(VERSION).tar.gz $(BINARY)-$(VERSION)
 

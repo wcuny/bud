@@ -40,6 +40,13 @@ func runUI(port int, noOpen bool) error {
 	}
 	srv := &http.Server{Handler: newHandler(st, port), ReadHeaderTimeout: 5 * time.Second}
 
+	// The pid file lets `bud ui --stop` find this server.
+	if pf, err := uiPidFile(port); err == nil {
+		if os.WriteFile(pf, []byte(strconv.Itoa(os.Getpid())), 0o600) == nil {
+			defer os.Remove(pf)
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errCh := make(chan error, 1)
@@ -61,6 +68,97 @@ func runUI(port int, noOpen bool) error {
 	defer cancel()
 	srv.Shutdown(shutCtx)
 	return nil
+}
+
+func uiPidFile(port int) (string, error) {
+	p, err := dbPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), fmt.Sprintf("ui-%d.pid", port)), nil
+}
+
+// Starts the dashboard as a background process in its own session
+func detachUI(port int, noOpen bool) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fail(fmt.Errorf("port %d is not available (already running? try `bud ui --stop`): %v", port, err))
+	}
+	ln.Close()
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fail(err)
+	}
+	c := exec.Command(exe, "ui", "--port", strconv.Itoa(port), "--no-open")
+	if err := detachAttrs(c); err != nil {
+		return fail(err)
+	}
+	if err := c.Start(); err != nil { // stdio defaults to the null device
+		return fail(err)
+	}
+	exited := make(chan struct{})
+	go func() { c.Wait(); close(exited) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+			conn.Close()
+			break
+		}
+		select {
+		case <-exited:
+			return fail(errors.New("the background dashboard exited during startup"))
+		case <-time.After(100 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			return fail(errors.New("timed out waiting for the dashboard to start"))
+		}
+	}
+	url := fmt.Sprintf("http://localhost:%d", port)
+	fmt.Fprintf(os.Stderr, "bud: dashboard running in the background at %s (pid %d); stop it with `bud ui --stop`\n", url, c.Process.Pid)
+	if !noOpen {
+		openBrowser(url)
+	}
+	return nil
+}
+
+// stopUI stops the dashboard started on this port (foreground or detached).
+func stopUI(port int) error {
+	pf, err := uiPidFile(port)
+	if err != nil {
+		return fail(err)
+	}
+	b, err := os.ReadFile(pf)
+	if err != nil {
+		return fail(fmt.Errorf("no dashboard is running on port %d", port))
+	}
+	// Only signal if something is really listening: guards against a stale
+	// pid file whose pid has since been reused by another process.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	pid, perr := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || perr != nil {
+		os.Remove(pf)
+		return fail(fmt.Errorf("no dashboard is running on port %d (removed a stale pid file)", port))
+	}
+	conn.Close()
+
+	proc, err := os.FindProcess(pid)
+	if err == nil {
+		err = proc.Signal(syscall.SIGTERM)
+	}
+	if err != nil {
+		return fail(fmt.Errorf("could not stop pid %d: %v", pid, err))
+	}
+	for i := 0; i < 30; i++ { // the server removes its pid file on exit
+		if _, err := os.Stat(pf); errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "bud: stopped the dashboard on port %d\n", port)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fail(fmt.Errorf("sent SIGTERM to pid %d but it has not exited yet", pid))
 }
 
 func openBrowser(url string) {

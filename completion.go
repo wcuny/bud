@@ -111,11 +111,24 @@ func genScript(root *cobra.Command, shell string, w io.Writer) error {
 	case "bash":
 		return root.GenBashCompletionV2(w, true)
 	case "zsh":
-		return root.GenZshCompletion(w)
+		var buf bytes.Buffer
+		if err := root.GenZshCompletion(&buf); err != nil {
+			return err
+		}
+		_, err := io.WriteString(w, zshClassicMenu(buf.String(), root.Name()))
+		return err
 	case "fish":
 		return root.GenFishCompletion(w, true)
 	}
 	return fmt.Errorf("unsupported shell %q (bash, zsh, fish)", shell)
+}
+
+// zshClassicMenu makes name completions behave like classic unix completion.
+// Setting compstate[insert] makes it insert only the common prefix and keep listing the matches instead.
+// If Cobra's generated script ever changes shape, the script is left as is.
+func zshClassicMenu(script, name string) string {
+	anchor := "__" + name + "_debug \"_describe found some completions\"\n"
+	return strings.Replace(script, anchor, anchor+"            compstate[insert]=unambiguous\n", 1)
 }
 
 func detectShell() (string, error) {
