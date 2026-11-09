@@ -62,6 +62,22 @@ This is particularly useful when working across multiple repositories or maintai
 
 Each user maintains a local SQLite database located at `~/.config/bud/db.sqlite`. Commands can be exported to a `bud.yaml` file and committed to a repository.
 
+Example `bud.yaml`:
+
+```yaml
+commands:
+  - name: rebuild
+    command: go clean -cache && go mod tidy && go build -ldflags="-s -w" -o bin/bud ./...
+    tip: Clean the Go build cache, resolve dependencies, and rebuild the application
+    tags: [build, maintenance]
+
+  - name: find-large-files
+    command: find . -type f -size +100M -exec ls -lh {} \; | sort -k5 -h
+    tip: Find files larger than 100 MB and sort them by size
+    tags: [filesystem, diagnostics]
+    scope: global
+```
+
 Other users can import those commands into their own local libraries using `bud sync`.
 
 ```bash
