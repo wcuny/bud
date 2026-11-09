@@ -56,7 +56,7 @@ func runUI(port int, noOpen bool) error {
 	go func() { errCh <- srv.Serve(ln) }()
 
 	url := fmt.Sprintf("http://localhost:%d", port)
-	fmt.Fprintf(os.Stderr, "bud: dashboard at %s (Ctrl-C to stop)\n", url)
+	fmt.Fprintf(os.Stderr, "bud: web UI at %s (Ctrl-C to stop)\n", url)
 	if !noOpen {
 		openBrowser(url)
 	}
@@ -81,7 +81,7 @@ func uiPidFile(port int) (string, error) {
 	return filepath.Join(filepath.Dir(p), fmt.Sprintf("ui-%d.pid", port)), nil
 }
 
-// Starts the dashboard as a background process in its own session
+// Starts the web UI as a background process in its own session
 func detachUI(port int, noOpen bool) error {
 	if alreadyRunning(port, noOpen) {
 		return nil
@@ -115,22 +115,22 @@ func detachUI(port int, noOpen bool) error {
 		}
 		select {
 		case <-exited:
-			return fail(errors.New("the background dashboard exited during startup"))
+			return fail(errors.New("the background web UI exited during startup"))
 		case <-time.After(100 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			return fail(errors.New("timed out waiting for the dashboard to start"))
+			return fail(errors.New("timed out waiting for the web UI to start"))
 		}
 	}
 	url := fmt.Sprintf("http://localhost:%d", port)
-	fmt.Fprintf(os.Stderr, "bud: dashboard running in the background at %s (pid %d); stop it with `bud ui --stop`\n", url, c.Process.Pid)
+	fmt.Fprintf(os.Stderr, "bud: web UI running in the background at %s (pid %d); stop it with `bud ui --stop`\n", url, c.Process.Pid)
 	if !noOpen {
 		openBrowser(url)
 	}
 	return nil
 }
 
-// runningUI reports the pid of a dashboard already serving this port. It
+// runningUI reports the pid of a web UI already serving this port. It
 // needs a pid file whose process is alive and a live listener on the port, so
 // a stale pid file (crash, reused pid) is never trusted.
 func runningUI(port int) (int, bool) {
@@ -163,14 +163,14 @@ func alreadyRunning(port int, noOpen bool) bool {
 		return false
 	}
 	url := fmt.Sprintf("http://localhost:%d", port)
-	fmt.Fprintf(os.Stderr, "bud: the dashboard is already running at %s (pid %d); stop it with `bud ui --stop`\n", url, pid)
+	fmt.Fprintf(os.Stderr, "bud: the web UI is already running at %s (pid %d); stop it with `bud ui --stop`\n", url, pid)
 	if !noOpen {
 		openBrowser(url)
 	}
 	return true
 }
 
-// stopUI stops the dashboard started on this port (foreground or detached).
+// stopUI stops the web UI started on this port (foreground or detached).
 func stopUI(port int) error {
 	pf, err := uiPidFile(port)
 	if err != nil {
@@ -180,9 +180,9 @@ func stopUI(port int) error {
 	if !ok {
 		if _, err := os.Stat(pf); err == nil {
 			os.Remove(pf)
-			return fail(fmt.Errorf("no dashboard is running on port %d (removed a stale pid file)", port))
+			return fail(fmt.Errorf("no web UI is running on port %d (removed a stale pid file)", port))
 		}
-		return fail(fmt.Errorf("no dashboard is running on port %d", port))
+		return fail(fmt.Errorf("no web UI is running on port %d", port))
 	}
 	proc, err := os.FindProcess(pid)
 	if err == nil {
@@ -193,7 +193,7 @@ func stopUI(port int) error {
 	}
 	for i := 0; i < 30; i++ { // the server removes its pid file on exit
 		if _, err := os.Stat(pf); errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "bud: stopped the dashboard on port %d\n", port)
+			fmt.Fprintf(os.Stderr, "bud: stopped the web UI on port %d\n", port)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)

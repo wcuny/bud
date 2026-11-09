@@ -587,7 +587,7 @@ func newUICmd() *cobra.Command {
 	var noOpen, detach, stop bool
 	c := &cobra.Command{
 		Use:   "ui [--port <n>] [--no-open] [--detach | --stop]",
-		Short: "Open the web dashboard",
+		Short: "Open the web UI",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -603,7 +603,7 @@ func newUICmd() *cobra.Command {
 	}
 	c.Flags().IntVar(&port, "port", defaultPort, "listen port")
 	c.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
-	c.Flags().BoolVar(&detach, "detach", false, "run the dashboard in the background")
-	c.Flags().BoolVar(&stop, "stop", false, "stop the background dashboard on --port")
+	c.Flags().BoolVar(&detach, "detach", false, "run the web UI in the background")
+	c.Flags().BoolVar(&stop, "stop", false, "stop the background web UI on --port")
 	return c
 }
