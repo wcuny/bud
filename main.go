@@ -522,35 +522,57 @@ func interactiveEdit(c *Command) {
 func newRmCmd() *cobra.Command {
 	var yes bool
 	c := &cobra.Command{
-		Use:               "rm <name> [-y]",
-		Short:             "Remove a saved command",
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeNames(false),
+		Use:               "rm <name>... [-y]",
+		Short:             "Remove one or more saved commands",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeNamesMulti,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := openStore()
 			if err != nil {
 				return fail(err)
 			}
 			defer st.Close()
-			c, err := st.Resolve(args[0], currentScope())
-			if err != nil {
-				return fail(err)
+
+			// Resolve every name first so a typo removes nothing
+			scope := currentScope()
+			var targets []*Command
+			seen := map[int64]bool{}
+			for _, name := range args {
+				c, err := st.Resolve(name, scope)
+				if err != nil {
+					return fail(err)
+				}
+				if !seen[c.ID] {
+					seen[c.ID] = true
+					targets = append(targets, c)
+				}
 			}
+
 			if !yes {
 				if !isTerminal(os.Stdin) {
 					return fail(errors.New("refusing to delete without -y when stdin is not a terminal"))
 				}
-				fmt.Fprintf(os.Stderr, "Remove %q (%s)? [y/N] ", c.Name, trunc(oneLine(c.Cmd), 50))
+				if len(targets) == 1 {
+					fmt.Fprintf(os.Stderr, "Remove %q (%s)? [y/N] ", targets[0].Name, trunc(oneLine(targets[0].Cmd), 50))
+				} else {
+					fmt.Fprintf(os.Stderr, "Remove %d commands?\n", len(targets))
+					for _, c := range targets {
+						fmt.Fprintf(os.Stderr, "  %s  (%s)\n", c.Name, trunc(oneLine(c.Cmd), 50))
+					}
+					fmt.Fprint(os.Stderr, "Remove them all? [y/N] ")
+				}
 				line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 				if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
 					fmt.Fprintln(os.Stderr, "bud: cancelled")
 					return exitError{1}
 				}
 			}
-			if err := st.Delete(c.ID); err != nil {
-				return fail(err)
+			for _, c := range targets {
+				if err := st.Delete(c.ID); err != nil {
+					return fail(err)
+				}
+				fmt.Fprintf(os.Stderr, "bud: removed %q\n", c.Name)
 			}
-			fmt.Fprintf(os.Stderr, "bud: removed %q\n", c.Name)
 			return nil
 		},
 	}

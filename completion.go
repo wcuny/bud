@@ -20,8 +20,39 @@ const (
 	rcEnd   = "# <<< bud completion <<<"
 )
 
-// completeNames completes the <name> argument from the library (current
-// scope first, then global: the same lookup run/info/edit/rm/copy use).
+func nameCandidates(toComplete string, exclude []string) []string {
+	st, err := openStore()
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	all, err := st.List()
+	if err != nil {
+		return nil
+	}
+	scope := currentScope()
+	seen := map[string]bool{}
+	for _, n := range exclude {
+		seen[n] = true
+	}
+	var out []string
+	for _, c := range rank(all, "", scope) {
+		if (c.Scope != scope && c.Scope != "") || seen[c.Name] {
+			continue
+		}
+		seen[c.Name] = true
+		if !strings.HasPrefix(c.Name, toComplete) {
+			continue
+		}
+		entry := c.Name
+		if tip := strings.ReplaceAll(oneLine(c.Tip), "\t", " "); tip != "" {
+			entry += "\t" + trunc(tip, 60)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 func completeNames(filesAfterName bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) > 0 {
@@ -30,34 +61,12 @@ func completeNames(filesAfterName bool) func(*cobra.Command, []string, string) (
 			}
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		st, err := openStore()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		defer st.Close()
-		all, err := st.List()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		scope := currentScope()
-		seen := map[string]bool{}
-		var out []string
-		for _, c := range rank(all, "", scope) {
-			if (c.Scope != scope && c.Scope != "") || seen[c.Name] {
-				continue
-			}
-			seen[c.Name] = true
-			if !strings.HasPrefix(c.Name, toComplete) {
-				continue
-			}
-			entry := c.Name
-			if tip := strings.ReplaceAll(oneLine(c.Tip), "\t", " "); tip != "" {
-				entry += "\t" + trunc(tip, 60)
-			}
-			out = append(out, entry)
-		}
-		return out, cobra.ShellCompDirectiveNoFileComp
+		return nameCandidates(toComplete, nil), cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+func completeNamesMulti(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return nameCandidates(toComplete, args), cobra.ShellCompDirectiveNoFileComp
 }
 
 func newCompletionCmd(root *cobra.Command) *cobra.Command {

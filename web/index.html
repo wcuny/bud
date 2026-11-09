@@ -14,6 +14,9 @@ button{cursor:pointer}button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.icon{display:inline-flex;align-items:center;justify-content:center;padding:5px;line-height:0}
 button.icon.danger:hover{border-color:var(--danger);color:var(--danger)}
+button.textbtn{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:13px}
+button.textbtn svg{flex:none}
+button:disabled{opacity:.5;cursor:default}button:disabled:hover{border-color:var(--line)}
 .sticky{position:sticky;top:0;z-index:5;background:var(--bg)}
 header{border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;justify-content:space-between}
 header h1{font-size:16px;margin:0}
@@ -88,6 +91,7 @@ const ICONS = {
   edit: '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
+  terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
 };
 function svg(name) {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS[name] + '</svg>';
@@ -182,14 +186,47 @@ async function load() {
   render();
 }
 
-async function copy(text, btn) {
+async function clip(text) {
   try { await navigator.clipboard.writeText(text); }
   catch {
     const t = el('textarea', {value: text});
     document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
   }
+}
+
+async function copy(text, btn) {
+  await clip(text);
   btn.innerHTML = svg('check');
   setTimeout(() => (btn.innerHTML = svg('copy')), 1000);
+}
+
+// POSIX shell quoting. leave plain words alone, single quote everything else.
+function shq(s) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+// A ready to paste `bud add` for an entry. Non global entries omit --global, so
+// the runner's copy lands in whichever directory/repo they run it from.
+function budAddCommand(c) {
+  const parts = ['bud add', '--name ' + shq(c.name), '--cmd ' + shq(c.cmd)];
+  if (c.tip) parts.push('--tip ' + shq(c.tip));
+  c.tags.forEach((t) => parts.push('--tag ' + shq(t)));
+  if (!c.scope) parts.push('--global');
+  return parts.join(' ');
+}
+
+function addCmdButton(c) {
+  const label = el('span', {textContent: 'Copy bud add command'});
+  const b = el('button', {className: 'textbtn', title: 'Copy a ready-to-paste "bud add" command for this entry'});
+  const icon = el('span', {});
+  icon.innerHTML = svg('terminal');
+  b.append(icon, label);
+  b.onclick = async () => {
+    await clip(budAddCommand(c));
+    icon.innerHTML = svg('check'); label.textContent = 'Copied';
+    setTimeout(() => { icon.innerHTML = svg('terminal'); label.textContent = 'Copy bud add command'; }, 1200);
+  };
+  return b;
 }
 
 function render() {
@@ -209,6 +246,7 @@ function render() {
       c.tip ? el('div', {className: 'tip', textContent: c.tip}) : '',
       el('div', {className: 'actions'},
         iconButton('edit', 'Edit', () => openDlg(c)),
+        addCmdButton(c),
         el('span', {className: 'spacer'}),
         iconButton('trash', 'Delete', () => del(c), 'danger')));
   }));
