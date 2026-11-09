@@ -28,7 +28,7 @@ bud do --cmd "docker compose logs -f api" \
 
 The command is saved to the local library and executed immediately through the host shell. It can subsequently be retrieved by name or search, keeping project specific commands accessible even as more of the development process is delegated to AI.
 
-To integrate `bud` with an AI assistant, add the following instructions to `CLAUDE.md`, `.cursorrules`, `~/.codex/config.toml`, etc., or your preferred system prompt:
+To integrate `bud` with an AI assistant, add the following instructions to `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, etc., or your preferred system prompt:
 
 ```text
 When providing shell commands that should be executed, use bud do:
