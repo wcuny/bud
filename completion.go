@@ -118,7 +118,22 @@ writable directory in its fpath (see the message printed).`,
 func genScript(root *cobra.Command, shell string, w io.Writer) error {
 	switch shell {
 	case "bash":
-		return root.GenBashCompletionV2(w, true)
+		var buf bytes.Buffer
+		if err := root.GenBashCompletionV2(&buf, true); err != nil {
+			return err
+		}
+		script := buf.String()
+		const old = `        IFS=$'\n' read -ra COMPREPLY -d '' < <(compgen -W "${completions[*]}" -- "$cur")`
+		const replacement = `        while IFS='' read -r comp; do
+            [[ -z $comp ]] && continue
+            [[ $comp == "$cur"* ]] || continue
+            COMPREPLY+=("$comp")
+        done < <(printf "%s\n" "${completions[@]}")`
+		if !strings.Contains(script, old) {
+			return errors.New("unsupported Bash completion script format")
+		}
+		_, err := io.WriteString(w, strings.Replace(script, old, replacement, 1))
+		return err
 	case "zsh":
 		var buf bytes.Buffer
 		if err := root.GenZshCompletion(&buf); err != nil {

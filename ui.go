@@ -81,6 +81,64 @@ func uiPidFile(port int) (string, error) {
 	return filepath.Join(filepath.Dir(p), fmt.Sprintf("ui-%d.pid", port)), nil
 }
 
+func uiPorts() ([]int, error) {
+	p, err := dbPath()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(filepath.Dir(p))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	const prefix, suffix = "ui-", ".pid"
+	var ports []int
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		port, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix))
+		if err == nil {
+			ports = append(ports, port)
+		}
+	}
+	sort.Ints(ports)
+	return ports, nil
+}
+
+func stopUIAny() error {
+	ports, err := uiPorts()
+	if err != nil {
+		return fail(err)
+	}
+	var running []int
+	for _, port := range ports {
+		if _, ok := runningUI(port); ok {
+			running = append(running, port)
+		}
+	}
+	switch len(running) {
+	case 0:
+		return fail(errors.New("no web UI is running"))
+	case 1:
+		return stopUI(running[0])
+	default:
+		return fail(fmt.Errorf("multiple web UIs are running; specify --port (%s)",
+			joinPorts(running)))
+	}
+}
+
+func joinPorts(ports []int) string {
+	values := make([]string, len(ports))
+	for i, port := range ports {
+		values[i] = strconv.Itoa(port)
+	}
+	return strings.Join(values, ", ")
+}
+
 // Starts the web UI as a background process in its own session
 func detachUI(port int, noOpen bool) error {
 	if alreadyRunning(port, noOpen) {
@@ -307,10 +365,14 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	tag := strings.ToLower(strings.TrimSpace(q.Get("tag")))
+	untagged := q.Get("untagged") == "1"
 	scope := q.Get("scope")
 	var keep []Command
 	for _, c := range all {
-		if tag != "" && !hasTag(c, tag) {
+		if untagged && len(c.Tags) != 0 {
+			continue
+		}
+		if !untagged && tag != "" && !hasTag(c, tag) {
 			continue
 		}
 		if scope == "global" && c.Scope != "" {
@@ -354,7 +416,7 @@ func decode(w http.ResponseWriter, r *http.Request) (*Command, bool) {
 		c.Scope = filepath.Clean(c.Scope)
 	}
 	if strings.TrimSpace(c.Cmd) == "" {
-		http.Error(w, "command is required", 400)
+		http.Error(w, "Command is required", 400)
 		return nil, false
 	}
 	if c.Name == "" {
@@ -370,7 +432,7 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.st.Create(c); err != nil {
 		if isUnique(err) {
-			http.Error(w, "that name already exists in this scope", 409)
+			http.Error(w, "Name already exists in this scope", 409)
 			return
 		}
 		http.Error(w, err.Error(), 500)
@@ -395,7 +457,7 @@ func (a *api) update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, sql.ErrNoRows):
 			http.Error(w, "not found", 404)
 		case isUnique(err):
-			http.Error(w, "that name already exists in this scope", 409)
+			http.Error(w, "Name already exists in this scope", 409)
 		default:
 			http.Error(w, err.Error(), 500)
 		}

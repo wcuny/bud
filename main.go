@@ -594,6 +594,9 @@ func newUICmd() *cobra.Command {
 			case detach && stop:
 				return errors.New("--detach and --stop are mutually exclusive")
 			case stop:
+				if !cmd.Flags().Changed("port") {
+					return stopUIAny()
+				}
 				return stopUI(port)
 			case detach:
 				return detachUI(port, noOpen)
@@ -603,7 +606,7 @@ func newUICmd() *cobra.Command {
 	}
 	c.Flags().IntVar(&port, "port", defaultPort, "listen port")
 	c.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
-	c.Flags().BoolVar(&detach, "detach", false, "run the web UI in the background")
-	c.Flags().BoolVar(&stop, "stop", false, "stop the background web UI on --port")
+	c.Flags().BoolVar(&detach, "detach", false, "run the web UI process in the background")
+	c.Flags().BoolVar(&stop, "stop", false, "stop the web UI (use --port to select one)")
 	return c
 }

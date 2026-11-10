@@ -49,6 +49,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 label{display:block;margin:10px 0 3px;font-size:12px;color:var(--muted)}
 dialog input,dialog textarea{width:100%}
 textarea{min-height:90px;font-family:ui-monospace,Menlo,Consolas,monospace}
+#f-cmd{font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap;overflow-x:auto}
 .err{color:var(--danger);margin-top:8px;min-height:1.2em}
 .row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 </style>
@@ -70,12 +71,12 @@ textarea{min-height:90px;font-family:ui-monospace,Menlo,Consolas,monospace}
 <dialog id="dlg">
   <form id="form">
     <strong id="dlgTitle"></strong>
-    <label for="f-name">Name</label><input id="f-name" autocomplete="off">
-    <label for="f-cmd">Command</label><textarea id="f-cmd" required></textarea>
-    <label for="f-tip">Tip</label><input id="f-tip" autocomplete="off">
-    <label for="f-tags">Tags (comma-separated)</label><input id="f-tags" autocomplete="off">
+    <label for="f-name">Name</label><input id="f-name" autocomplete="off" spellcheck="false">
+    <label for="f-cmd">Command</label><input id="f-cmd" autocomplete="off" spellcheck="false" required>
+    <label for="f-tip">Tip</label><textarea id="f-tip" spellcheck="false"></textarea>
+    <label for="f-tags">Tags (comma separated)</label><input id="f-tags" autocomplete="off" spellcheck="false">
     <label for="f-scope">Scope: directory or repo path (blank = global)</label>
-    <input id="f-scope" list="scopeList" autocomplete="off"><datalist id="scopeList"></datalist>
+    <input id="f-scope" list="scopeList" autocomplete="off" spellcheck="false"><datalist id="scopeList"></datalist>
     <div class="err" id="err"></div>
     <div class="row"><button type="button" id="cancel">Cancel</button><button class="primary" type="submit">Save</button></div>
   </form>
@@ -89,7 +90,7 @@ let editingId = null;
 const ICONS = {
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   edit: '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
-  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
   terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
 };
@@ -170,16 +171,18 @@ function combo(root, allLabel, onchange) {
   };
 }
 
+const noTagsValue = '__no_tags__';
 const tagCombo = combo($('#tag'), 'All tags', () => load());
 const scopeCombo = combo($('#scope'), 'All repos/dirs', () => load());
 
 async function load() {
   const p = new URLSearchParams();
   if ($('#q').value.trim()) p.set('q', $('#q').value.trim());
-  if (tagCombo.value) p.set('tag', tagCombo.value);
+  if (tagCombo.value === noTagsValue) p.set('untagged', '1');
+  else if (tagCombo.value) p.set('tag', tagCombo.value);
   if (scopeCombo.value) p.set('scope', scopeCombo.value);
   try { state = await api('/api/commands?' + p); } catch (e) { $('#list').textContent = e.message; return; }
-  tagCombo.setOptions(state.tags.map((t) => ({value: t, label: t})));
+  tagCombo.setOptions([{value: noTagsValue, label: 'No tags'}, ...state.tags.map((t) => ({value: t, label: t}))]);
   scopeCombo.setOptions(state.scopes);
   $('#scopeList').replaceChildren(...state.scopes.filter((s) => s.value !== 'global')
     .map((s) => el('option', {value: s.value})));
@@ -216,15 +219,13 @@ function budAddCommand(c) {
 }
 
 function addCmdButton(c) {
-  const label = el('span', {textContent: 'Copy bud add command'});
-  const b = el('button', {className: 'textbtn', title: 'Copy a ready-to-paste "bud add" command for this entry'});
-  const icon = el('span', {});
-  icon.innerHTML = svg('terminal');
-  b.append(icon, label);
+  const label = el('span', {textContent: 'Copy "bud add" command'});
+  const b = el('button', {className: 'textbtn', title: 'Copy "bud add" command for this entry'});
+  b.append(label);
   b.onclick = async () => {
     await clip(budAddCommand(c));
-    icon.innerHTML = svg('check'); label.textContent = 'Copied';
-    setTimeout(() => { icon.innerHTML = svg('terminal'); label.textContent = 'Copy bud add command'; }, 1200);
+    label.textContent = 'Copied';
+    setTimeout(() => { label.textContent = 'Copy "bud add" command'; }, 1200);
   };
   return b;
 }

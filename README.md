@@ -127,6 +127,14 @@ Install the resulting binary:
 sudo install -m 755 bud /usr/local/bin/bud
 ```
 
+### Tab completion
+
+Tab completion is available. Install the completion scripts with:
+
+```bash
+bud completion install
+```
+
 ### Shell execution
 
 `bud do` executes commands through `$SHELL -c` (falling back to the platform shell when `$SHELL` is unavailable).
