@@ -21,9 +21,9 @@ AI assistants frequently generate commands tailored to a particular repository o
 `bud do` combines execution and storage into one operation.
 
 ```bash
-bud do --cmd "docker compose logs -f api" \
-  --name "api-logs" \
-  --tip "Follow API container logs"
+bud do --cmd 'docker compose logs -f api' \
+  --name 'api-logs' \
+  --tip 'Follow API container logs'
 ```
 
 The command is saved to the local library and executed immediately through the host shell. It can subsequently be retrieved by name or search, keeping project specific commands accessible even as more of the development process is delegated to AI.
@@ -31,17 +31,39 @@ The command is saved to the local library and executed immediately through the h
 To integrate `bud` with an AI assistant, add the following instructions to `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, etc., or your preferred system prompt:
 
 ```text
-When providing shell commands that should be executed, use bud do:
+## Using bud for executable shell commands
 
-bud do --cmd "<exact_command>" --name "<short_alias>" --tip "<concise_description>"
+`bud` is a local command library. It stores useful shell commands by name so they
+can be found and reused later. `bud do` saves a command and executes it
+immediately; use it whenever you are giving the user a shell command that you
+intend them to run now.
 
-Follow these rules:
-- bud do executes the command immediately and saves it to the command library. Do not use it for commands that are only being discussed or presented as examples.
-- Commands are scoped to the current Git repository by default. Preserve this behavior unless the command is genuinely independent of any project.
-- Use --global only for commands that are completely repo-agnostic.
-- Use short, descriptive names that are easy to remember and reuse.
-- Do not save commands containing credentials, tokens, or other sensitive values.
-- Preserve the original command and its arguments. Do not change its behavior when wrapping it in bud do.
+Use this form:
+
+bud do --cmd '<exact_command>' --name '<short_descriptive_name>' --tip '<brief_description>'
+
+Rules:
+- Wrap the complete command exactly as it should be executed in `--cmd`.
+- Preserve the command's original arguments, quoting, operators, pipes, redirects,
+  environment variables, and shell behavior. Do not simplify or rewrite it.
+- Quote every string flag value so the user's current shell does not evaluate it
+  before Bud receives it. Prefer single quotes for `--cmd`, `--name`, `--tip`,
+  and other string values. For example, use `bud do --cmd 'echo "$MYVAR"'`,
+  not `bud do --cmd "echo \"$MYVAR\""`, which expands `$MYVAR` too early. If a
+  value contains a single quote, use a shell-safe alternative such as escaped
+  single quotes or carefully escaped double quotes.
+- Use a short, descriptive, reusable `--name` that reflects the command's purpose.
+- Use `--tip` to briefly explain what the command does.
+- Commands are scoped to the current Git repository by default. Use `--global`
+  only for commands that are genuinely independent of any repository or directory.
+- Do not use `bud do` for commands that are only being shown as examples,
+  discussed hypothetically, or not intended to run immediately.
+- Never store credentials, access tokens, private keys, or other sensitive values
+  in the command or its options. Use placeholders and ask the user to provide
+  sensitive values separately when needed.
+- If a command contains shell state changes such as `cd`, `export`, or `source`,
+  preserve them exactly. They affect the current shell only when the user has
+  enabled bud's optional shell integration.
 ```
 
 This makes command capture part of the normal development workflow without requiring a separate cataloging step.
