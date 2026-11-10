@@ -141,6 +141,29 @@ bud completion install
 
 Standard input, output, and error are connected directly to the child process. This preserves normal shell behavior, including pipes, redirections, environment variables, and terminal signals.
 
+### Optional shell integration
+
+By default, `bud run` and `bud do` execute commands in a child shell. This means
+commands such as `cd`, `export`, and `source` do not affect your current terminal.
+
+To let saved commands modify your current interactive shell, add the following
+line to your shell startup file:
+
+For Zsh, add this to `~/.zshrc`:
+
+```bash
+eval "$(bud shell-init zsh)"
+```
+
+For Bash, add this to `~/.bashrc`:
+
+```bash
+eval "$(bud shell-init bash)"
+```
+
+Restart your shell, or run the line once manually. With shell integration
+enabled, `bud run` and `bud do` execute saved commands in your current shell.
+
 ## Web UI
 
 Start the local web UI:

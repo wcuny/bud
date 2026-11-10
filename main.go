@@ -63,7 +63,7 @@ is placed in your terminal prompt so you can edit it before running.`,
 	root.AddCommand(
 		newDoCmd(), newAddCmd(), newRunCmd(), newListCmd(), newSearchCmd(),
 		newInfoCmd(), newEditCmd(), newRmCmd(), newCopyCmd(), newExportCmd(), newSyncCmd(), newUICmd(),
-		newCompletionCmd(root), newVersionCmd(),
+		newCompletionCmd(root), newShellInitCmd(), newVersionCmd(),
 	)
 	return root
 }
@@ -159,6 +159,7 @@ func newAddCmd() *cobra.Command {
 
 func newDoCmd() *cobra.Command {
 	var o saveOpts
+	var emit bool
 	c := &cobra.Command{
 		Use:     "do --cmd <command> [--name <alias>] [--tip <text>] [--tag <tag>] [--global]",
 		Short:   "Save a command and run it immediately",
@@ -173,12 +174,24 @@ func newDoCmd() *cobra.Command {
 			st, err := openStore()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bud: warning: not saved:", err)
+				if emit {
+					fmt.Fprintln(os.Stdout, c.Cmd)
+					return nil
+				}
 				return exitWith(execShell(c.Cmd)) // still run what the user asked for
 			}
 			defer st.Close()
 			if err := save(st, c); err != nil {
 				fmt.Fprintln(os.Stderr, "bud: warning: not saved:", err)
+				if emit {
+					fmt.Fprintln(os.Stdout, c.Cmd)
+					return nil
+				}
 				return exitWith(execShell(c.Cmd))
+			}
+			if emit {
+				fmt.Fprintln(os.Stdout, c.Cmd)
+				return nil
 			}
 			code := execShell(c.Cmd)
 			st.RecordRun(c.ID)
@@ -186,12 +199,15 @@ func newDoCmd() *cobra.Command {
 		},
 	}
 	o.bind(c)
+	c.Flags().BoolVar(&emit, "emit", false, "internal: print the command instead of running it")
+	_ = c.Flags().MarkHidden("emit")
 	return c
 }
 
 // ---- run / picker ----
 
 func newRunCmd() *cobra.Command {
+	var emit bool
 	c := &cobra.Command{
 		Use:   "run [name] [extra args...]",
 		Short: "Run a saved command",
@@ -221,12 +237,18 @@ With no name, opens the interactive picker (same as running bare 'bud').`,
 			for _, a := range extra {
 				target += " " + shQuote(a)
 			}
+			if emit {
+				fmt.Fprintln(os.Stdout, target)
+				return nil
+			}
 			code := execShell(target)
 			st.RecordRun(c.ID)
 			return exitWith(code)
 		},
 	}
 	c.Flags().SetInterspersed(false) // everything after the name is passed through
+	c.Flags().BoolVar(&emit, "emit", false, "internal: print the command instead of running it")
+	_ = c.Flags().MarkHidden("emit")
 	return c
 }
 
