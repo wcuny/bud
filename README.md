@@ -18,7 +18,10 @@ This makes `bud` useful for individual development, team workflows, and AI assis
 
 AI assistants frequently generate commands tailored to a particular repository or development environment. As more of the development process is delegated to AI assistants and agents, the commands used along the way become harder to track, understand, and reuse. 
 
-`bud do` combines execution and storage into one operation.
+`bud do` combines execution and storage into one operation when the user has
+asked the assistant to run a command immediately. When the assistant needs to
+give the user one or more commands to run themselves, `bud add` stores each
+command without executing it.
 
 ```bash
 bud do --cmd 'docker compose logs -f api' \
@@ -34,13 +37,18 @@ To integrate `bud` with an AI assistant, add the following instructions to `CLAU
 ## Using bud for executable shell commands
 
 `bud` is a local command library. It stores useful shell commands by name so they
-can be found and reused later. `bud do` saves a command and executes it
-immediately; use it whenever you are giving the user a shell command that you
-intend them to run now.
+can be found and reused later. Use `bud do` when the user has asked you to run
+a command immediately. Use `bud add` when you are giving the user a command to
+run themselves later, or a series of commands that should be reviewed and run
+individually; `bud add` saves commands without executing them.
 
-Use this form:
+For a command that should run immediately, use this form:
 
 bud do --cmd '<exact_command>' --name '<short_descriptive_name>' --tip '<brief_description>'
+
+For a command that should be saved without running, use this form:
+
+bud add --cmd '<exact_command>' --name '<short_descriptive_name>' --tip '<brief_description>'
 
 Rules:
 - Wrap the complete command exactly as it should be executed in `--cmd`.
@@ -56,8 +64,6 @@ Rules:
 - Use `--tip` to briefly explain what the command does.
 - Commands are scoped to the current Git repository by default. Use `--global`
   only for commands that are genuinely independent of any repository or directory.
-- Do not use `bud do` for commands that are only being shown as examples,
-  discussed hypothetically, or not intended to run immediately.
 - Never store credentials, access tokens, private keys, or other sensitive values
   in the command or its options. Use placeholders and ask the user to provide
   sensitive values separately when needed.
